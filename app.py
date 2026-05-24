@@ -5,17 +5,28 @@ import streamlit as st
 from groq import Groq
 from audio_recorder_streamlit import audio_recorder
 import tempfile
-import whisper
 import asyncio
 import edge_tts
 import base64
 
-# 🔥 Groq client
-client = Groq(api_key="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")
+# =========================
+# 🔥 PAGE CONFIG (مهم للموبايل)
+# =========================
+st.set_page_config(
+    page_title="OSCE Simulator",
+    layout="centered"
+)
+
+# =========================
+# 🔥 GROQ CLIENT (آمن)
+# =========================
+client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 st.title("🩺 محاكي OSCE - النساء والتوليد (صوتي)")
 
-# 🇸🇦 SYSTEM PROMPT مطور لفهم السؤال بدقة
+# =========================
+# 🇸🇦 SYSTEM PROMPT
+# =========================
 SYSTEM_PROMPT = """
 أنتِ مريضة حامل في امتحان OSCE في النساء والتوليد.
 
@@ -23,7 +34,6 @@ SYSTEM_PROMPT = """
 - افهمي السؤال جيدًا قبل الإجابة.
 - أجيبي فقط على السؤال المباشر.
 - إذا لم يكن سؤال واضح قولي: "لم أفهم السؤال"
-- لا تغيّري الموضوع أبداً.
 - لا تذكري التشخيص.
 - كوني طبيعية وواقعية جداً.
 - إجاباتك قصيرة مثل المريض الحقيقي.
@@ -34,43 +44,54 @@ SYSTEM_PROMPT = """
 
 st.write("🎤 تحدث واسأل المريضة")
 
-# 🧠 MEMORY SYSTEM
+# =========================
+# 🧠 MEMORY
+# =========================
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "system", "content": SYSTEM_PROMPT}
     ]
 
-# تحميل Whisper مرة واحدة
-@st.cache_resource
-def load_model():
-    return whisper.load_model("base")
-
-model = load_model()
-
+# =========================
+# 🎤 RECORD AUDIO
+# =========================
 audio_bytes = audio_recorder()
 
 if audio_bytes:
 
     st.audio(audio_bytes, format="audio/wav")
 
-    # حفظ الصوت
+    # =========================
+    # 🔊 SAVE AUDIO
+    # =========================
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
         tmp_file.write(audio_bytes)
         temp_path = tmp_file.name
 
-    # 🎤 تحويل صوت إلى نص
-    result = model.transcribe(temp_path)
-    user_text = result["text"]
+    # =========================
+    # 🧠 GROQ TRANSCRIPTION (بديل Whisper)
+    # =========================
+    with open(temp_path, "rb") as audio_file:
+        transcription = client.audio.transcriptions.create(
+            file=audio_file,
+            model="whisper-large-v3"
+        )
+
+    user_text = transcription.text
 
     st.write("### أنت قلت:")
     st.write(user_text)
 
-    # 🧠 إضافة الرسالة للذاكرة
+    # =========================
+    # 🧠 ADD USER MESSAGE
+    # =========================
     st.session_state.messages.append(
         {"role": "user", "content": user_text}
     )
 
-    # 🧠 ذكاء Groq مع ذاكرة كاملة
+    # =========================
+    # 🧠 AI RESPONSE
+    # =========================
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -80,9 +101,8 @@ if audio_bytes:
         ai_reply = response.choices[0].message.content
 
     except Exception as e:
-        ai_reply = f"حدث خطأ في الذكاء الاصطناعي: {str(e)}"
+        ai_reply = f"خطأ في الذكاء الاصطناعي: {str(e)}"
 
-    # 🧠 حفظ رد المريضة
     st.session_state.messages.append(
         {"role": "assistant", "content": ai_reply}
     )
@@ -90,7 +110,9 @@ if audio_bytes:
     st.write("### المريضة:")
     st.write(ai_reply)
 
-    # 🔊 TTS
+    # =========================
+    # 🔊 TEXT TO SPEECH
+    # =========================
     async def speak(text):
         communicate = edge_tts.Communicate(
             text,
@@ -100,7 +122,9 @@ if audio_bytes:
 
     asyncio.run(speak(ai_reply))
 
-    # 🔊 تشغيل تلقائي
+    # =========================
+    # 🔊 AUTO PLAY AUDIO
+    # =========================
     audio_bytes = open("response.mp3", "rb").read()
 
     st.markdown(
@@ -112,4 +136,4 @@ if audio_bytes:
         unsafe_allow_html=True
     )
 
-    st.success("🔊 الصوت يعمل تلقائيًا الآن")
+    st.success("🔊 الصوت يعمل تلقائيًا")
